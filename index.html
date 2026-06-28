@@ -6489,33 +6489,7 @@ function App() {
     return () => window.removeEventListener("resize", h);
   }, []);
 
-  // ── Pantalla de carga ─────────────────────────────────────────────────────
-  if (sbLoading) {
-    return React.createElement("div", {
-      style: { minHeight: "100vh", background: T.bg, display: "flex", flexDirection: "column",
-               alignItems: "center", justifyContent: "center", gap: 16, fontFamily: "system-ui" }
-    },
-      React.createElement("span", { style: { fontSize: 40 } }, "💰"),
-      React.createElement("div", { style: { color: T.text, fontSize: 18, fontWeight: 600 } }, "Cargando MisFinanzas…"),
-      React.createElement("div", { style: { color: T.muted, fontSize: 13 } }, "Conectando a Supabase")
-    );
-  }
-
-  if (sbError) {
-    return React.createElement("div", {
-      style: { minHeight: "100vh", background: T.bg, display: "flex", flexDirection: "column",
-               alignItems: "center", justifyContent: "center", gap: 16, fontFamily: "system-ui", padding: 32 }
-    },
-      React.createElement("span", { style: { fontSize: 40 } }, "❌"),
-      React.createElement("div", { style: { color: "#f87171", fontSize: 16, fontWeight: 600 } }, "Error de conexión"),
-      React.createElement("div", { style: { color: T.muted, fontSize: 13, maxWidth: 400, textAlign: "center" } }, sbError),
-      React.createElement("button", {
-        onClick: () => window.location.reload(),
-        style: { background: T.green, color: "#020817", border: "none", borderRadius: 8,
-                 padding: "10px 24px", fontSize: 14, fontWeight: 600, cursor: "pointer", marginTop: 8 }
-      }, "🔄 Reintentar")
-    );
-  }
+  // ── Pantalla de carga y error se renderizan al final (hooks deben ir primero)
   const isMobile = vw < 640;
   const isTablet = vw < 1024;
   const accounts = useMemo(() => state.accounts.map(a => ({
@@ -6669,6 +6643,32 @@ function App() {
     saveGoal,
     delGoal
   };
+  // ── Pantalla de carga ─────────────────────────────────────────────────────
+  if (sbLoading) {
+    return React.createElement("div", {
+      style: { minHeight: "100vh", background: T.bg, display: "flex", flexDirection: "column",
+               alignItems: "center", justifyContent: "center", gap: 16, fontFamily: "system-ui" }
+    },
+      React.createElement("span", { style: { fontSize: 40 } }, "💰"),
+      React.createElement("div", { style: { color: T.text, fontSize: 18, fontWeight: 600 } }, "Cargando MisFinanzas…"),
+      React.createElement("div", { style: { color: T.muted, fontSize: 13 } }, "Conectando a Supabase")
+    );
+  }
+  if (sbError) {
+    return React.createElement("div", {
+      style: { minHeight: "100vh", background: T.bg, display: "flex", flexDirection: "column",
+               alignItems: "center", justifyContent: "center", gap: 16, fontFamily: "system-ui", padding: 32 }
+    },
+      React.createElement("span", { style: { fontSize: 40 } }, "❌"),
+      React.createElement("div", { style: { color: "#f87171", fontSize: 16, fontWeight: 600 } }, "Error de conexión"),
+      React.createElement("div", { style: { color: T.muted, fontSize: 13, maxWidth: 400, textAlign: "center" } }, sbError),
+      React.createElement("button", {
+        onClick: () => window.location.reload(),
+        style: { background: T.green, color: "#020817", border: "none", borderRadius: 8,
+                 padding: "10px 24px", fontSize: 14, fontWeight: 600, cursor: "pointer", marginTop: 8 }
+      }, "🔄 Reintentar")
+    );
+  }
   return /*#__PURE__*/React.createElement(ErrorBoundary, null, /*#__PURE__*/React.createElement("div", {
     key: "root-" + themeVer,
     style: {
