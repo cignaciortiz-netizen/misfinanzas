@@ -6324,6 +6324,70 @@ function SettingsPanel({
 
 // ── App root ──────────────────────────────────────────────────────────────────
 
+// ── Login Screen (Magic Link) ─────────────────────────────────────────────
+function LoginScreen() {
+  const [email, setEmail] = React.useState("cignaciortiz@gmail.com");
+  const [sent, setSent] = React.useState(false);
+  const [loading, setLoading] = React.useState(false);
+  const [err, setErr] = React.useState(null);
+
+  const sendLink = async () => {
+    setLoading(true);
+    setErr(null);
+    try {
+      const sb = getSB();
+      const { error } = await sb.auth.signInWithOtp({
+        email,
+        options: { emailRedirectTo: window.location.href }
+      });
+      if (error) throw error;
+      setSent(true);
+    } catch (e) {
+      setErr(e.message);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  return React.createElement("div", {
+    style: { minHeight: "100vh", background: T.bg, display: "flex", flexDirection: "column",
+             alignItems: "center", justifyContent: "center", gap: 20, fontFamily: "system-ui", padding: 32 }
+  },
+    React.createElement("span", { style: { fontSize: 48 } }, "💰"),
+    React.createElement("div", { style: { color: T.text, fontSize: 22, fontWeight: 700 } }, "MisFinanzas"),
+    sent
+      ? React.createElement("div", {
+          style: { background: T.card, border: `1px solid ${T.green}`, borderRadius: 12,
+                   padding: "20px 28px", textAlign: "center", maxWidth: 360 }
+        },
+          React.createElement("div", { style: { fontSize: 32, marginBottom: 10 } }, "📬"),
+          React.createElement("div", { style: { color: T.green, fontWeight: 600, marginBottom: 6 } }, "Revisa tu correo"),
+          React.createElement("div", { style: { color: T.muted, fontSize: 13 } },
+            "Te enviamos un link a ", React.createElement("b", { style: { color: T.text } }, email),
+            ". Haz clic en él para entrar.")
+        )
+      : React.createElement("div", {
+          style: { background: T.card, border: `1px solid ${T.border}`, borderRadius: 12,
+                   padding: "24px 28px", display: "flex", flexDirection: "column", gap: 14, width: "100%", maxWidth: 360 }
+        },
+          React.createElement("div", { style: { color: T.muted, fontSize: 13 } }, "Ingresa con tu email"),
+          React.createElement("input", {
+            value: email,
+            onChange: e => setEmail(e.target.value),
+            placeholder: "tu@email.com",
+            style: { ...S_INP }
+          }),
+          err && React.createElement("div", { style: { color: T.red, fontSize: 12 } }, err),
+          React.createElement("button", {
+            onClick: sendLink,
+            disabled: loading || !email,
+            style: { background: T.green, color: "#020817", border: "none", borderRadius: 8,
+                     padding: "10px", fontSize: 14, fontWeight: 600, cursor: "pointer" }
+          }, loading ? "Enviando…" : "Enviar magic link ✉️")
+        )
+  );
+}
+
 // ── Error Boundary ────────────────────────────────────────────────────────────
 class ErrorBoundary extends React.Component {
   constructor(props) {
@@ -6415,25 +6479,19 @@ function App() {
       try {
         const sb = getSB();
         if (!sb) throw new Error("Supabase no inicializado — recarga la página");
-        // Obtener sesión actual
         const { data: { session }, error: sErr } = await sb.auth.getSession();
         if (sErr) throw sErr;
         if (!session) {
-          // Sin sesión: intentar login anónimo (Supabase anon sign-in)
-          const { data, error: signErr } = await sb.auth.signInAnonymously();
-          if (signErr) throw signErr;
-          setSbUserId(data.user.id);
-          _prevState = null;
-          const loaded = await loadFromSupabase(data.user.id);
-          _prevState = loaded;
-          setState(loaded);
-        } else {
-          setSbUserId(session.user.id);
-          _prevState = null;
-          const loaded = await loadFromSupabase(session.user.id);
-          _prevState = loaded;
-          setState(loaded);
+          // Sin sesión: mostrar pantalla de login
+          setSbLoading(false);
+          setSbUserId(null);
+          return;
         }
+        setSbUserId(session.user.id);
+        _prevState = null;
+        const loaded = await loadFromSupabase(session.user.id);
+        _prevState = loaded;
+        setState(loaded);
       } catch (e) {
         console.error("Supabase init error:", e);
         setSbError(e.message || "Error conectando a Supabase");
@@ -6442,6 +6500,21 @@ function App() {
       }
     }
     init();
+    // Escuchar cambios de sesión (cuando llega el magic link)
+    const sb = getSB();
+    if (!sb) return;
+    const { data: { subscription } } = sb.auth.onAuthStateChange(async (event, session) => {
+      if (event === "SIGNED_IN" && session) {
+        setSbUserId(session.user.id);
+        setSbLoading(true);
+        _prevState = null;
+        const loaded = await loadFromSupabase(session.user.id);
+        _prevState = loaded;
+        setState(loaded);
+        setSbLoading(false);
+      }
+    });
+    return () => subscription.unsubscribe();
   }, []);
 
   // ── Realtime: escuchar INSERTs de Make.com en transacciones ──────────────
@@ -6643,6 +6716,10 @@ function App() {
     saveGoal,
     delGoal
   };
+  // ── Pantalla de login ─────────────────────────────────────────────────────
+  if (!sbLoading && !sbError && !sbUserId) {
+    return React.createElement(LoginScreen, null);
+  }
   // ── Pantalla de carga ─────────────────────────────────────────────────────
   if (sbLoading) {
     return React.createElement("div", {
