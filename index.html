@@ -20,14 +20,7 @@
   <script src="https://cdnjs.cloudflare.com/ajax/libs/prop-types/15.8.1/prop-types.min.js"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/recharts/2.12.7/Recharts.js"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
-  <!-- Supabase JS: módulo ES → avisa cuando esté listo vía evento -->
-  <script type="module">
-    import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
-    const SUPABASE_URL  = "https://fokiszemjatdpbhglpas.supabase.co";
-    const SUPABASE_ANON = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImZva2lzemVtamF0ZHBiaGdscGFzIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODI2NzI0NTMsImV4cCI6MjA5ODI0ODQ1M30.xO7UTcbHhLZiMf2svaqrnnuJXItfSybIcDHuaehts0U";
-    window._supabase = createClient(SUPABASE_URL, SUPABASE_ANON);
-    window.dispatchEvent(new Event("supabase-ready"));
-  </script>
+  <!-- Sin Supabase SDK — usamos fetch directo igual que Chronos -->
   <script>
     const { useState, useEffect, useMemo, useRef, useCallback } = React;
     const { PieChart, Pie, Cell, BarChart, Bar, XAxis, YAxis, Tooltip,
@@ -192,42 +185,70 @@ const TABS = [{
   id: "Configuración",
   icon: "⚙️"
 }];
-// ── Credenciales Supabase ─────────────────────────────────────────────────────
-const SUPABASE_URL  = "https://fokiszemjatdpbhglpas.supabase.co";
-const SUPABASE_ANON = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImZva2lzemVtamF0ZHBiaGdscGFzIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODI2NzI0NTMsImV4cCI6MjA5ODI0ODQ1M30.xO7UTcbHhLZiMf2svaqrnnuJXItfSybIcDHuaehts0U";
+// ── SUPABASE SYNC ENGINE (mismo patrón que Chronos) ──────────────────────────
+// Pre-cargar credenciales conocidas si no hay nada guardado
+(function(){
+  const K_URL='mf_sb_url', K_ANON='mf_sb_anon', K_UID='mf_sb_uid';
+  if(!localStorage.getItem(K_URL)){
+    localStorage.setItem(K_URL,'https://fokiszemjatdpbhglpas.supabase.co');
+    localStorage.setItem(K_ANON,'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImZva2lzemVtamF0ZHBiaGdscGFzIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODI2NzI0NTMsImV4cCI6MjA5ODI0ODQ1M30.xO7UTcbHhLZiMf2svaqrnnuJXItfSybIcDHuaehts0U');
+  }
+  // Siempre corregir el UID a un UUID válido
+  localStorage.setItem(K_UID,'17ebb2ae-b868-51c2-80a2-220519cc4795');
+})();
 
-// Cliente Supabase — disponible desde el módulo ES cargado arriba (window._supabase)
-function getSB() { return window._supabase; }
-
-// ── Helpers REST sobre Supabase ───────────────────────────────────────────────
-const SB_HEADERS = {
-  "apikey": SUPABASE_ANON,
-  "Authorization": `Bearer ${SUPABASE_ANON}`,
-  "Content-Type": "application/json",
-  "Prefer": "return=representation"
+const SB = {
+  K_URL: 'mf_sb_url', K_ANON: 'mf_sb_anon', K_UID: 'mf_sb_uid',
+  _load(k){ try{ return localStorage.getItem(k)||''; }catch{ return ''; } },
+  _save(k,v){ try{ localStorage.setItem(k,v); }catch{} },
+  get url(){ return this._load(this.K_URL); },
+  get anon(){ return this._load(this.K_ANON); },
+  get uid(){ return this._load(this.K_UID); },
+  configured(){ return !!(this.url && this.anon && this.uid); },
+  configure(url, anon){
+    const cleanUrl = url.replace(/\/+$/,'');
+    this._save(this.K_URL, cleanUrl);
+    this._save(this.K_ANON, anon);
+    // UUID v5 determinístico desde el anon key usando SHA-1
+    const bytes = new TextEncoder().encode('mf:' + anon);
+    crypto.subtle.digest('SHA-1', bytes).then(buf => {
+      const h = Array.from(new Uint8Array(buf)).map(b=>b.toString(16).padStart(2,'0')).join('');
+      const uid = `${h.slice(0,8)}-${h.slice(8,12)}-5${h.slice(13,16)}-${((parseInt(h.slice(16,18),16)&0x3f)|0x80).toString(16)}${h.slice(18,20)}-${h.slice(20,32)}`;
+      this._save(this.K_UID, uid);
+    });
+  },
+  disconnect(){
+    [this.K_URL, this.K_ANON, this.K_UID].forEach(k=>this._save(k,''));
+  },
+  headers(extra){
+    return { 'apikey': this.anon, 'Authorization': 'Bearer '+this.anon,
+             'Content-Type': 'application/json', 'Prefer': 'return=representation', ...extra };
+  },
 };
 
+// ── Helpers REST sobre Supabase ───────────────────────────────────────────────
 async function sbSelect(table, filters = "") {
-  const url = `${SUPABASE_URL}/rest/v1/${table}?select=*${filters ? "&" + filters : ""}`;
-  const r = await fetch(url, { headers: SB_HEADERS });
-  if (!r.ok) throw new Error(`sbSelect ${table}: ${r.status}`);
+  const url = `${SB.url}/rest/v1/${table}?select=*${filters ? "&" + filters : ""}`;
+  const r = await fetch(url, { headers: SB.headers() });
+  if (!r.ok) {
+    const body = await r.text();
+    throw new Error(`sbSelect ${table}: ${r.status} — ${body}`);
+  }
   return r.json();
 }
-
 async function sbUpsert(table, rows) {
-  const url = `${SUPABASE_URL}/rest/v1/${table}`;
+  const url = `${SB.url}/rest/v1/${table}`;
   const r = await fetch(url, {
     method: "POST",
-    headers: { ...SB_HEADERS, "Prefer": "resolution=merge-duplicates,return=representation" },
+    headers: SB.headers({ "Prefer": "resolution=merge-duplicates,return=representation" }),
     body: JSON.stringify(Array.isArray(rows) ? rows : [rows])
   });
   if (!r.ok) { const e = await r.text(); throw new Error(`sbUpsert ${table}: ${e}`); }
   return r.json();
 }
-
 async function sbDelete(table, id) {
-  const url = `${SUPABASE_URL}/rest/v1/${table}?id=eq.${id}`;
-  const r = await fetch(url, { method: "DELETE", headers: SB_HEADERS });
+  const url = `${SB.url}/rest/v1/${table}?id=eq.${id}`;
+  const r = await fetch(url, { method: "DELETE", headers: SB.headers() });
   if (!r.ok) throw new Error(`sbDelete ${table}: ${r.status}`);
 }
 
@@ -249,11 +270,11 @@ function txToSB(t, userId) {
   return {
     id:          t.id,
     user_id:     userId,
-    fecha:       t.date,
-    monto:       t.amount,
-    tipo:        t.amount >= 0 ? "ingreso" : "gasto",
+    fecha:       t.date || new Date().toISOString().slice(0,10),
+    monto:       t.amount || 0,
+    tipo:        (t.amount || 0) >= 0 ? "ingreso" : "gasto",
     categoria:   t.cat || "Otros",
-    cuenta:      t.acc,
+    cuenta:      t.acc || "",
     descripcion: t.desc || "",
     is_transfer: t.isTransfer || false
   };
@@ -273,8 +294,8 @@ function accToSB(a, userId) {
   return {
     id:      a.id,
     user_id: userId,
-    nombre:  a.name,
-    tipo:    a.type,
+    nombre:  a.name || "",
+    tipo:    a.type || "corriente",
     base:    a.base || 0,
     color:   a.color || null,
     activa:  a.active !== false
@@ -328,7 +349,8 @@ function catFromSB(r) {
 }
 
 // ── Carga completa desde Supabase ─────────────────────────────────────────────
-async function loadFromSupabase(userId) {
+async function loadFromSupabase() {
+  const userId = SB.uid;
   const [txRows, accRows, budRows, goalRows, estRows, debtRows, ruleRows, catRows] = await Promise.all([
     sbSelect("transacciones", `user_id=eq.${userId}&order=fecha.desc`),
     sbSelect("cuentas",       `user_id=eq.${userId}`),
@@ -355,26 +377,34 @@ async function loadFromSupabase(userId) {
 // ── Persistencia granular (se llama desde setState) ───────────────────────────
 // Guardamos el estado previo para detectar diff y solo upsert lo que cambió
 let _prevState = null;
-async function syncStateToSupabase(state, userId) {
-  if (!userId) return;
+let _syncErrorCallback = null;
+async function syncStateToSupabase(state) {
+  if (!SB.configured()) return;
+  const userId = SB.uid;
   const prev = _prevState;
+  if (!prev) { _prevState = state; return; } // primera carga — no hay nada que sincronizar
   _prevState = state;
-  if (!prev) return; // primera vez — los datos ya vienen de Supabase
 
+  const errors = [];
   const upsertIfChanged = async (key, toSB, table) => {
     if (state[key] === prev[key]) return;
+    if (JSON.stringify(state[key]||[]) === JSON.stringify(prev[key]||[])) return;
     const prevIds = new Set((prev[key] || []).map(x => x.id));
     const currIds = new Set((state[key] || []).map(x => x.id));
-    // Upsert nuevos/modificados
     const toUpsert = (state[key] || []).filter(x => {
-      if (!prevIds.has(x.id)) return true; // nuevo
-      const p = prev[key].find(p => p.id === x.id);
-      return JSON.stringify(p) !== JSON.stringify(x); // modificado
+      if (!prevIds.has(x.id)) return true;
+      const p = (prev[key] || []).find(p => p.id === x.id);
+      return JSON.stringify(p) !== JSON.stringify(x);
     });
-    // Eliminar los que ya no están
     const toRemove = (prev[key] || []).filter(x => !currIds.has(x.id));
-    if (toUpsert.length) await sbUpsert(table, toUpsert.map(x => toSB(x, userId))).catch(console.error);
-    for (const x of toRemove) await sbDelete(table, x.id).catch(console.error);
+    if (toUpsert.length) {
+      try { await sbUpsert(table, toUpsert.map(x => toSB(x, userId))); }
+      catch(e) { console.error('[MisFinanzas] Error guardando '+table+':', e); errors.push(table+': '+e.message); }
+    }
+    for (const x of toRemove) {
+      try { await sbDelete(table, x.id); }
+      catch(e) { errors.push(table+' delete: '+e.message); }
+    }
   };
 
   await Promise.all([
@@ -387,6 +417,7 @@ async function syncStateToSupabase(state, userId) {
     upsertIfChanged("rules",        ruleToSB,    "reglas"),
     upsertIfChanged("cats",         catToSB,     "categorias"),
   ]);
+  if (errors.length && _syncErrorCallback) _syncErrorCallback(errors.join(' | '));
 }
 
 // Stub clearStorage — ya no borra nada localmente (datos están en Supabase)
@@ -399,7 +430,7 @@ const clp = n => new Intl.NumberFormat("es-CL", {
   minimumFractionDigits: 0
 }).format(Math.round(n || 0));
 const pct = (a, b) => b === 0 ? 0 : Math.min(100, Math.round(a / b * 100));
-const uid = () => Math.random().toString(36).slice(2, 8);
+const uid = () => { try { return crypto.randomUUID(); } catch(_) { return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, c => { const r = Math.random()*16|0; return (c==='x'?r:(r&0x3|0x8)).toString(16); }); } };
 const nowMonth = () => {
   const d = new Date();
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
@@ -6324,67 +6355,71 @@ function SettingsPanel({
 
 // ── App root ──────────────────────────────────────────────────────────────────
 
-// ── Login Screen (Magic Link) ─────────────────────────────────────────────
-function LoginScreen() {
-  const [email, setEmail] = React.useState("cignaciortiz@gmail.com");
-  const [sent, setSent] = React.useState(false);
+// ── Setup Screen (patrón Chronos: pega URL + anon key) ───────────────────────
+function SetupScreen({ onConnect }) {
+  const [url, setUrl] = React.useState(SB._load(SB.K_URL) || "");
+  const [anon, setAnon] = React.useState(SB._load(SB.K_ANON) || "");
   const [loading, setLoading] = React.useState(false);
   const [err, setErr] = React.useState(null);
 
-  const sendLink = async () => {
-    setLoading(true);
-    setErr(null);
+  const connect = async () => {
+    if (!url || !anon) return;
+    setLoading(true); setErr(null);
     try {
-      const sb = getSB();
-      const { error } = await sb.auth.signInWithOtp({
-        email,
-        options: { emailRedirectTo: window.location.href }
+      const cleanUrl = url.replace(/\/+$/, "");
+      const uid = anon.slice(-16);
+      const r = await fetch(`${cleanUrl}/rest/v1/cuentas?user_id=eq.${uid}&select=id&limit=1`, {
+        headers: { "apikey": anon, "Authorization": "Bearer " + anon }
       });
-      if (error) throw error;
-      setSent(true);
-    } catch (e) {
-      setErr(e.message);
-    } finally {
-      setLoading(false);
-    }
+      if (!r.ok && r.status !== 406) throw new Error(`Error ${r.status}: ${await r.text()}`);
+      SB.configure(url, anon);
+      onConnect();
+    } catch(e) { setErr(e.message); }
+    finally { setLoading(false); }
   };
 
+  const inp = { background: "#1e2025", border: "1px solid #3f4046", borderRadius: 8,
+                color: "#f1f1f3", padding: "10px 12px", fontSize: 13, width: "100%",
+                outline: "none", fontFamily: "monospace" };
+
   return React.createElement("div", {
-    style: { minHeight: "100vh", background: T.bg, display: "flex", flexDirection: "column",
+    style: { minHeight: "100vh", background: "#111214", display: "flex", flexDirection: "column",
              alignItems: "center", justifyContent: "center", gap: 20, fontFamily: "system-ui", padding: 32 }
   },
     React.createElement("span", { style: { fontSize: 48 } }, "💰"),
-    React.createElement("div", { style: { color: T.text, fontSize: 22, fontWeight: 700 } }, "MisFinanzas"),
-    sent
-      ? React.createElement("div", {
-          style: { background: T.card, border: `1px solid ${T.green}`, borderRadius: 12,
-                   padding: "20px 28px", textAlign: "center", maxWidth: 360 }
-        },
-          React.createElement("div", { style: { fontSize: 32, marginBottom: 10 } }, "📬"),
-          React.createElement("div", { style: { color: T.green, fontWeight: 600, marginBottom: 6 } }, "Revisa tu correo"),
-          React.createElement("div", { style: { color: T.muted, fontSize: 13 } },
-            "Te enviamos un link a ", React.createElement("b", { style: { color: T.text } }, email),
-            ". Haz clic en él para entrar.")
-        )
-      : React.createElement("div", {
-          style: { background: T.card, border: `1px solid ${T.border}`, borderRadius: 12,
-                   padding: "24px 28px", display: "flex", flexDirection: "column", gap: 14, width: "100%", maxWidth: 360 }
-        },
-          React.createElement("div", { style: { color: T.muted, fontSize: 13 } }, "Ingresa con tu email"),
-          React.createElement("input", {
-            value: email,
-            onChange: e => setEmail(e.target.value),
-            placeholder: "tu@email.com",
-            style: { ...S_INP }
-          }),
-          err && React.createElement("div", { style: { color: T.red, fontSize: 12 } }, err),
-          React.createElement("button", {
-            onClick: sendLink,
-            disabled: loading || !email,
-            style: { background: T.green, color: "#020817", border: "none", borderRadius: 8,
-                     padding: "10px", fontSize: 14, fontWeight: 600, cursor: "pointer" }
-          }, loading ? "Enviando…" : "Enviar magic link ✉️")
-        )
+    React.createElement("div", { style: { color: "#f1f1f3", fontSize: 22, fontWeight: 700 } }, "MisFinanzas"),
+    React.createElement("div", {
+      style: { background: "#1a1c1f", border: "1px solid #2e3035", borderRadius: 14,
+               padding: "28px", display: "flex", flexDirection: "column", gap: 16,
+               width: "100%", maxWidth: 420 }
+    },
+      React.createElement("div", { style: { color: "#9ca3af", fontSize: 14, fontWeight: 600 } }, "Conectar a Supabase"),
+      React.createElement("div", { style: { color: "#6b7280", fontSize: 12, lineHeight: "1.5" } },
+        "Pega tu URL y anon key. Sin login — sincroniza automáticamente."
+      ),
+      React.createElement("div", { style: { display: "flex", flexDirection: "column", gap: 6 } },
+        React.createElement("label", { style: { color: "#9ca3af", fontSize: 12 } }, "URL del proyecto"),
+        React.createElement("input", { value: url, onChange: e => setUrl(e.target.value),
+          placeholder: "https://xxxxxxxx.supabase.co", style: inp })
+      ),
+      React.createElement("div", { style: { display: "flex", flexDirection: "column", gap: 6 } },
+        React.createElement("label", { style: { color: "#9ca3af", fontSize: 12 } }, "Anon Key"),
+        React.createElement("textarea", { value: anon, onChange: e => setAnon(e.target.value),
+          placeholder: "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...", rows: 3,
+          style: { ...inp, resize: "vertical" } })
+      ),
+      err && React.createElement("div", {
+        style: { background: "#2d1515", border: "1px solid #7f1d1d", borderRadius: 8,
+                 padding: "10px 12px", color: "#fca5a5", fontSize: 12 }
+      }, "❌ " + err),
+      React.createElement("button", {
+        onClick: connect, disabled: loading || !url || !anon,
+        style: { background: url && anon && !loading ? "#6EE7B7" : "#1e2025",
+                 color: url && anon && !loading ? "#020817" : "#6b7280",
+                 border: "none", borderRadius: 8, padding: "11px",
+                 fontSize: 14, fontWeight: 600, cursor: url && anon && !loading ? "pointer" : "default" }
+      }, loading ? "Verificando…" : "Conectar ✓")
+    )
   );
 }
 
@@ -6461,6 +6496,11 @@ function App() {
   const [sbLoading, setSbLoading] = useState(true);
   const [sbError, setSbError] = useState(null);
   const [sbUserId, setSbUserId] = useState(null);
+  const [syncError, setSyncError] = useState(null);
+  useEffect(() => {
+    _syncErrorCallback = msg => { setSyncError(msg); setTimeout(() => setSyncError(null), 8000); };
+    return () => { _syncErrorCallback = null; };
+  }, []);
 
   const setPrefs = p => {
     setPrefsRaw(p);
@@ -6477,19 +6517,14 @@ function App() {
   useEffect(() => {
     async function init() {
       try {
-        const sb = getSB();
-        if (!sb) throw new Error("Supabase no inicializado — recarga la página");
-        const { data: { session }, error: sErr } = await sb.auth.getSession();
-        if (sErr) throw sErr;
-        if (!session) {
-          // Sin sesión: mostrar pantalla de login
+        if (!SB.configured()) {
           setSbLoading(false);
           setSbUserId(null);
           return;
         }
-        setSbUserId(session.user.id);
+        setSbUserId(SB.uid);
         _prevState = null;
-        const loaded = await loadFromSupabase(session.user.id);
+        const loaded = await loadFromSupabase();
         _prevState = loaded;
         setState(loaded);
       } catch (e) {
@@ -6500,51 +6535,33 @@ function App() {
       }
     }
     init();
-    // Escuchar cambios de sesión (cuando llega el magic link)
-    const sb = getSB();
-    if (!sb) return;
-    const { data: { subscription } } = sb.auth.onAuthStateChange(async (event, session) => {
-      if (event === "SIGNED_IN" && session) {
-        setSbUserId(session.user.id);
-        setSbLoading(true);
-        _prevState = null;
-        const loaded = await loadFromSupabase(session.user.id);
-        _prevState = loaded;
-        setState(loaded);
-        setSbLoading(false);
-      }
-    });
-    return () => subscription.unsubscribe();
   }, []);
 
-  // ── Realtime: escuchar INSERTs de Make.com en transacciones ──────────────
+  // ── Polling ligero cada 30s para detectar INSERTs externos (ej: Make.com) ──
   useEffect(() => {
     if (!sbUserId) return;
-    const sb = getSB();
-    if (!sb) return;
-    const channel = sb
-      .channel("transacciones-realtime")
-      .on("postgres_changes", {
-        event: "INSERT",
-        schema: "public",
-        table: "transacciones",
-        filter: `user_id=eq.${sbUserId}`
-      }, payload => {
-        const newTx = txFromSB(payload.new);
+    let lastCheck = Date.now();
+    const poll = setInterval(async () => {
+      try {
+        const since = new Date(lastCheck).toISOString();
+        lastCheck = Date.now();
+        const rows = await sbSelect("transacciones", `user_id=eq.${sbUserId}&created_at=gt.${since}&order=fecha.desc`);
+        if (!rows.length) return;
         setState(prev => {
-          // Evitar duplicados
-          if (prev.transactions.some(t => t.id === newTx.id)) return prev;
-          return { ...prev, transactions: [newTx, ...prev.transactions] };
+          const existingIds = new Set(prev.transactions.map(t => t.id));
+          const newTxs = rows.map(txFromSB).filter(t => !existingIds.has(t.id));
+          if (!newTxs.length) return prev;
+          return { ...prev, transactions: [...newTxs, ...prev.transactions] };
         });
-      })
-      .subscribe();
-    return () => { sb.removeChannel(channel); };
+      } catch(_) {}
+    }, 30000);
+    return () => clearInterval(poll);
   }, [sbUserId]);
 
   // ── Sync a Supabase cuando cambia el estado ────────────────────────────────
   useEffect(() => {
     if (!sbUserId || sbLoading) return;
-    syncStateToSupabase(state, sbUserId);
+    syncStateToSupabase(state);
   }, [state]);
 
   // ── Cargar SheetJS si no está disponible ──────────────────────────────────
@@ -6718,7 +6735,16 @@ function App() {
   };
   // ── Pantalla de login ─────────────────────────────────────────────────────
   if (!sbLoading && !sbError && !sbUserId) {
-    return React.createElement(LoginScreen, null);
+    return React.createElement(SetupScreen, {
+      onConnect: () => {
+        setSbLoading(true);
+        setSbUserId(SB.uid);
+        loadFromSupabase().then(loaded => {
+          _prevState = loaded;
+          setState(loaded);
+        }).catch(e => setSbError(e.message)).finally(() => setSbLoading(false));
+      }
+    });
   }
   // ── Pantalla de carga ─────────────────────────────────────────────────────
   if (sbLoading) {
@@ -6976,19 +7002,14 @@ function App() {
       setModal(null);
     },
     onSaveTransfer: saveTransfer
-  })));
+  })), syncError && /*#__PURE__*/React.createElement("div", { style: { position:"fixed", bottom:20, left:"50%", transform:"translateX(-50%)", background:"#7f1d1d", color:"#fca5a5", border:"1px solid #ef4444", borderRadius:10, padding:"12px 20px", fontSize:13, fontWeight:500, zIndex:9999, maxWidth:480, textAlign:"center", boxShadow:"0 4px 24px #0008" } }, "⚠️ Error al guardar en Supabase: " + syncError));
 }
     function mountApp() {
       const container = document.getElementById('root');
       const root = ReactDOM.createRoot(container);
       root.render(React.createElement(App));
     }
-    // Esperar a que el módulo ES de Supabase esté listo antes de montar React
-    if (window._supabase) {
-      mountApp();
-    } else {
-      window.addEventListener("supabase-ready", mountApp, { once: true });
-    }
+    mountApp();
   </script>
 </body>
 </html>
